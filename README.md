@@ -104,3 +104,8 @@ Note that, the disk size (D) is 40 in default setting.
 
 ### Performance
 Please refer to this [issue#1](https://github.com/lyqun/PU-Net_pytorch/issues/1). I will update later.
+
+### Changes
+Added TDA Losses in the model (see train_tda.py). Will add google drive to presentation and paper soon. 
+Added bash files for running in the Compute Cluster.
+Changed training and testing and eval for TDA Loss incorporation
