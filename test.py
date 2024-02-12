@@ -34,7 +34,7 @@ if __name__ == '__main__':
     model.load_state_dict(checkpoint['model_state'])
     model.eval().cuda()
 
-    eval_dst = PUNET_Dataset_Whole(data_dir='./datas/test_data/our_collected_data/MC_5k')
+    eval_dst = PUNET_Dataset_Whole(data_dir='/usr/xtmp/wgk4/PU-Net_pytorch_datas/test_data/our_collected_data/MC_5k')
     eval_loader = DataLoader(eval_dst, batch_size=1, 
                         shuffle=False, pin_memory=True, num_workers=0)
     

@@ -45,6 +45,7 @@ def get_cd_loss(pred, gt, pcd_radius):
 
 
 if __name__ == '__main__':
+    print("Here")
     MODEL = importlib.import_module('models.' + args.model)
     model = MODEL.get_model(npoint=1024, up_ratio=args.up_ratio, 
                 use_normal=False, use_bn=args.use_bn, use_res=args.use_res)

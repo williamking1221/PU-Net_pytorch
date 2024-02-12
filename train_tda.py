@@ -1,5 +1,9 @@
 import argparse
 import os
+# import torch_tda
+# import bats
+from torch_topological.nn import VietorisRipsComplex
+from torch_topological.nn import WassersteinDistance
 
 parser = argparse.ArgumentParser(description="Arg parser")
 parser.add_argument('--gpu', type=int, default=0, help='GPU to use')
@@ -12,6 +16,7 @@ parser.add_argument('--batch_size', type=int, default=32, help='Batch Size durin
 parser.add_argument("--use_bn", action='store_true', default=False)
 parser.add_argument("--use_res", action='store_true', default=False)
 parser.add_argument("--alpha", type=float, default=1.0) # for repulsion loss
+parser.add_argument("--beta", type=float, default=1.0) # for tda loss
 parser.add_argument('--optim', type=str, default='adam')
 parser.add_argument('--use_decay', action='store_true', default=False)
 parser.add_argument('--lr', type=float, default=0.001)
@@ -39,9 +44,16 @@ import importlib
 
 
 class UpsampleLoss(nn.Module):
-    def __init__(self, alpha=1.0, nn_size=5, radius=0.07, h=0.03, eps=1e-12):
+    def __init__(self, alpha=1.0, beta=1.0, n=16, dim=0, q=2, voxelize=False, nn_size=5, radius=0.07, h=0.03, eps=1e-12):
         super().__init__()
         self.alpha = alpha
+        self.beta = beta
+
+        self.n = n
+        self.dim = dim
+        self.q = q
+        self.voxelize = voxelize
+
         self.nn_size = nn_size
         self.radius = radius
         self.h = h
@@ -81,12 +93,80 @@ class UpsampleLoss(nn.Module):
         weight = torch.exp(- dist2 / self.h ** 2)
 
         uniform_loss = torch.mean((self.radius - dist) * weight)
-        
+
         return uniform_loss
 
+    def get_voxel_loss(self, pred, gt):
+        VR = VietorisRipsComplex(dim=self.dim)
+        WD = WassersteinDistance(q=self.q)
+        if pred.shape[0] != 0 and gt.shape[0] != 0:
+            if pred.shape[0] > self.n:
+                shuffled_indices_pred = torch.randperm(pred.size(0))
+                sampled_indices_pred = shuffled_indices_pred[:self.n]
+                pred_sampled = pred[sampled_indices_pred]
+            else:
+                pred_sampled = pred_voxel
+            if gt_voxel.shape[0] > self.nn:
+                shuffled_indices_gt = torch.randperm(gt.size(0))
+                sampled_indices_gt = shuffled_indices_gt[:self.n]
+                gtd = gt_voxel[sampled_indices_gt]
+            else:
+                gtd = gt_voxel
+
+            dgm_pred = VR(pred_sampled)
+            dgm_gt = VR(gtd)
+
+            voxel_loss = WD(dgm_pred, dgm_gt)
+            
+            return voxel_loss
+
+
+    def get_tda_loss(self, pred, gt):
+        tda_loss = 0
+        for (pred_sample, gt_sample) in list(zip(pred, gt)):
+            if self.voxelize:
+                sample_loss = 0
+
+                combined_sample = torch.cat([gt_sample], dim=0)
+                x_boundaries = torch.linspace(combined_sample[:, 0].min().item(), combined_sample[:, 0].max().item(), 3)
+                y_boundaries = torch.linspace(combined_sample[:, 1].min().item(), combined_sample[:, 1].max().item(), 3)
+                z_boundaries = torch.linspace(combined_sample[:, 2].min().item(), combined_sample[:, 2].max().item(), 3)
+    
+                for i in range(2):
+                    for j in range(2):
+                        for k in range(2):
+                            x_min, x_max = x_boundaries[i], x_boundaries[i + 1]
+                            y_min, y_max = y_boundaries[j], y_boundaries[j + 1]
+                            z_min, z_max = z_boundaries[k], z_boundaries[k + 1]
+
+                            pred_voxel = pred_sample[
+                                (pred_sample[:, 0] >= x_min) & (pred_sample[:, 0] < x_max) &
+                                (pred_sample[:, 1] >= y_min) & (pred_sample[:, 1] < y_max) & 
+                                (pred_sample[:, 2] >= z_min) & (pred_sample[:, 2] < z_max)
+                            ]
+
+                            gt_voxel = gt_sample[
+                                (gt_sample[:, 0] >= x_min) & (gt_sample[:, 0] < x_max) &
+                                (gt_sample[:, 1] >= y_min) & (gt_sample[:, 1] < y_max) & 
+                                (gt_sample[:, 2] >= z_min) & (gt_sample[:, 2] < z_max)
+                            ]
+
+                            sample_loss += self.get_voxel_loss(pred_voxel, gt_voxel)
+            else:
+                sample_loss = self.get_voxel_loss(pred, gt) 
+            print("Sample Loss: ", sample_loss)
+            tda_loss += sample_loss
+        
+        average_batch_loss = tda_loss / pred.shape[0]
+
+        return average_batch_loss
+
     def forward(self, pred, gt, pcd_radius):
-        return self.get_emd_loss(pred, gt, pcd_radius) * 100, \
-            self.alpha * self.get_repulsion_loss(pred)
+        emd_loss = self.get_emd_loss(pred, gt, pcd_radius)
+        repulsion_loss = self.get_repulsion_loss(pred)
+        tda_loss = self.get_tda_loss(pred, gt)
+
+        return emd_loss * 100, repulsion_loss * self.alpha, tda_loss * self.beta
 
 def get_optimizer():
     if args.optim == 'adam':
@@ -125,13 +205,14 @@ if __name__ == '__main__':
     model.cuda()
     
     optimizer, lr_scheduler = get_optimizer()
-    loss_func = UpsampleLoss(alpha=args.alpha)
+    loss_func = UpsampleLoss(alpha=args.alpha, beta=args.beta, n=16, dim=0, q=2, voxelize=True)
 
     model.train()
     for epoch in range(args.max_epoch):
         loss_list = []
         emd_loss_list = []
         rep_loss_list = []
+        tda_loss_list = []
         for batch in train_loader:
             optimizer.zero_grad()
             input_data, gt_data, radius_data = batch
@@ -142,8 +223,8 @@ if __name__ == '__main__':
             radius_data = radius_data.float().cuda()
 
             preds = model(input_data)
-            emd_loss, rep_loss = loss_func(preds, gt_data, radius_data)
-            loss = emd_loss + rep_loss
+            emd_loss, rep_loss, tda_loss = loss_func(preds, gt_data, radius_data)
+            loss = emd_loss + rep_loss + tda_loss
 
             loss.backward()
             optimizer.step()
@@ -151,13 +232,15 @@ if __name__ == '__main__':
             loss_list.append(loss.item())
             emd_loss_list.append(emd_loss.item())
             rep_loss_list.append(rep_loss.item())
-        print(' -- epoch {}, loss {:.4f}, weighted emd loss {:.4f}, repulsion loss {:.4f}, lr {}.'.format(
-            epoch, np.mean(loss_list), np.mean(emd_loss_list), np.mean(rep_loss_list), \
+            tda_loss_list.append(tda_loss.item())
+
+        print(' -- epoch {}, loss {:.4f}, weighted emd loss {:.4f}, repulsion loss {:.4f}, tda loss {:.4f} lr {}.'.format(
+            epoch, np.mean(loss_list), np.mean(emd_loss_list), np.mean(rep_loss_list), np.mean(tda_loss_list), \
             optimizer.state_dict()['param_groups'][0]['lr']))
         
         if lr_scheduler is not None:
             lr_scheduler.step(epoch)
-        if (epoch + 1) % 20 == 0:
+        if (epoch + 1) % 1 == 0:
             state = {'epoch': epoch, 'model_state': model.state_dict()}
             save_path = os.path.join(args.log_dir, 'punet_epoch_{}.pth'.format(epoch))
             torch.save(state, save_path)

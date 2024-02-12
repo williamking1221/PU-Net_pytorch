@@ -122,44 +122,6 @@ class PUNET_Dataset(torch_data.Dataset):
             if np.random.rand() > 0.5:
                 input_data = utils.rotate_perturbation_point_cloud(input_data, angle_sigma=0.03, angle_clip=0.09)
         else:
-            raise NotImplementedError
+            pass
 
         return input_data, gt_data, radius_data
-
-            
-if __name__ == '__main__':
-    test_choice = np.random.choice(4000, 800, replace=False)
-    # f_test = open('test_list.txt', 'w')
-    # f_train = open('train_list.txt', 'w')
-    # train_list = []
-    # test_list = []
-    # for i in range(4000):
-    #     if i in test_choice:
-    #         test_list.append(i)
-    #     else:
-    #         train_list.append(i)
-    # f_test.close()
-    # f_train.close()
-
-    # dst = PUNET_Dataset_WholeFPS_1k()
-    # for batch in dst:
-    #     pcd, gt, r = batch
-    #     print(pcd.shape)
-    #     print(gt.shape)
-    #     print(r.shape)
-    #     import pdb
-    #     pdb.set_trace()
-
-    ## test <PUNET_Dataset>
-    # dst = PUNET_Dataset()
-    # print(len(dst))
-    # for batch in dst:
-    #     pcd, gt, r = batch
-    #     print(pcd.shape)
-    #     import pdb
-    #     pdb.set_trace()
-
-    ## test <PUNET_Dataset_Whole>
-    # dst = PUNET_Dataset_Whole()
-    # points, name = dst[0]
-    # print(points, name)
